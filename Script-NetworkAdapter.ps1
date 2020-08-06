@@ -6,26 +6,22 @@ param (
     [string]
     $adapter_name,
     # Parameter help description
-    [Parameter(AttributeValues)]
+    [Parameter()]
     [switch]
     $wake_up
 )
 
 $net_adapters = get-netadapter -name $adapter_name*
 
-function adapterValidation {
+function parameterValidation {
     param (
         # Parameter help description
         [Parameter()]
-        $adapter
+        $adapter_name
     )
     try {
-        # if ($device_id.count -gt 1) {
-        # throw "ERROR - Apdater resulted in multiple elements. Please provide more specific Adapter Name"
-        # }
-        $status = $adapter | where-object Status -eq up
-        if (-not $status) {
-            throw "ERROR - The status of Adapter is not Active"
+        if (-not $adapter_name) {
+            throw "ERROR - adapter_name is Empty and is a required parameter for this script"
         }
     }
     catch {
@@ -41,10 +37,12 @@ function selectAdapter {
         $net_adapters
     )
     try {
-        $interfacedescription_possible_map = ("Intel","Killer")
+        $interfacedescription_possible_array = ("Intel","Killer")
         foreach($adapter in $net_adapters){
-            if ($adapter.InterfaceDescription -in $interfacedescription_possible_map) {
-                return $adapter
+            foreach($name in $interfacedescription_possible_array ){
+                if (($adapter.InterfaceDescription -like "*$($name)*") -and ($adapter.Status -eq "Up") ) {
+                    return $adapter
+                }
             }
         }
         throw "Could Not find the proper adapter."
@@ -54,21 +52,13 @@ function selectAdapter {
     }
 }
 
+adapterValidation $adapter_name
 $adapter = selectAdapter $net_adapters
-adapterValidation $adapter
+
 
 $wakeonmagicpacket_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonmagicpacket"
-# $device_wake = Get-CimInstance -ClassName MSPower_DeviceWakeEnable -Namespace root/wmi | where-object instancename -like "*$($device_id)*"
 
 if (($wakeonmagicpacket_status -ne "Enabled") -and ($wake_up) ) {
     Enable-NetAdapterPowerManagement -Name $adapter.Name -WakeOnMagicPacket
 }
 
-# $device_wake_enable = $device_wake.Enable
-
-# if (!($device_wake_enable -and $wake_up)){
-#     Set-CimInstance $device_wake -Property @{Enable=$wake_up}
-# }
-
-#Get-NetAdapterPowerManagement -Name "Ethernet" | select -ExpandProperty "wakeonmagicpacket"
-#Enable-NetAdapterPowerManagement -Name "Ethernet" -WakeOnMagicPacket
