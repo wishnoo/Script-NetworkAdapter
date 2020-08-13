@@ -15,7 +15,7 @@ param (
     $disable_wakeonlan,
     [Parameter()]
     [switch]
-    $disablefaststartup
+    $disable_faststartup
 )
 # This makes all non terminating errors stop
 $ErrorActionPreference = 'Stop'
@@ -142,7 +142,8 @@ function enablePowerManagement {
     try {
         Write-Output "STARTFUNCTION: enablePowerManagement"
         <# Note: When you use Get-CimInstance to get instance of the class MSNdis_DeviceWakeOnMagicPacketOnly we are unable to call Put method on the base class as it does not exist. Using Get-WMIObject we are able to call the put method and therfore making the change persistant. #>
-        $pnp_deviceid = $adapter | Select-Object -ExpandProperty "PNPDeviceID"
+        # $pnp_deviceid = $adapter | Select-Object -ExpandProperty "PnPDeviceID"
+        $pnp_deviceid = $adapter.PnPDeviceID
 
         #-----> Allow the computer to turn off this device to save power
 
@@ -277,7 +278,8 @@ function disablePowerManagement {
     try {
         Write-Output "STARTFUNCTION: disablePowerManagement"
         <# Note: When you use Get-CimInstance to get instance of the class MSNdis_DeviceWakeOnMagicPacketOnly we are unable to call Put method on the base class as it does not exist. Using Get-WMIObject we are able to call the put method and therfore making the change persistant. #>
-        $pnp_deviceid = $adapter | Select-Object -ExpandProperty "PNPDeviceID"
+        # $pnp_deviceid = $adapter | Select-Object -ExpandProperty "PnPDeviceID"
+        $pnp_deviceid = $adapter.PnPDeviceID
 
         #-----> Allow the computer to turn off this device to save power
 
@@ -405,13 +407,14 @@ try {
     }
 
     # Check if disablefaststartup switch is present and if present execute accourdingly.
-    if ($disablefaststartup) {
+    if ($disable_faststartup) {
         disableHiberbootEnabledRegistry
     }
 
 }
 catch {
     Write-Output "ERROR: Main Block"
+    Write-Output $PSItem.tostring()
 }
 
 
