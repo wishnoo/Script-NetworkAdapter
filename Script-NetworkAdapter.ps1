@@ -15,10 +15,155 @@ param (
     $disable_wakeonlan,
     [Parameter()]
     [switch]
-    $disable_faststartup
+    $disable_faststartup,
+    [Parameter()]
+    [string] $logFileNamePrefix="WakeOnLan" #Default value is WakeOnLan - prefix to the log file
 )
 # This makes all non terminating errors stop
 $ErrorActionPreference = 'Stop'
+
+<#
+currentFolderPath - Name of the path where the executable reside relative to path of the console.
+#>
+$currentFolderPath = Split-Path $script:MyInvocation.MyCommand.Path
+$currentFolderPath += '\'
+
+<#
+compname - Current local computer name where the script is executed.
+#>
+$compName = $env:COMPUTERNAME
+
+<#
+Log function to output to verbose stream as well as log into file
+#>
+function Submit-Log {
+    [cmdletbinding()]
+    param (
+        [string]$text,
+        $errorRecord
+    )
+
+    try {
+        Write-Verbose "STARTFUNCTION: Submit-Log"
+         # Prepend time with text using get-date and .tostring method
+        $Entry = (Get-Date).ToString( 'M/d/yyyy HH:mm:ss - ' ) + $text
+
+        #  Write entry to log file
+        $Entry | Out-File -FilePath $logFilePath -Encoding UTF8 -Append
+
+        #  Write entry to screen
+        Write-Verbose -Message $Entry -Verbose
+
+        #  If error record included
+        #   Recurse to capture exception details
+        If ( $errorRecord -is [System.Management.Automation.ErrorRecord] )
+        {
+            Submit-Log -Text "Exception.Message [$($errorRecord.Exception.Message)]"
+            Submit-Log -Text "Exception.GetType() [$($errorRecord.Exception.GetType())]"
+            Submit-Log -Text "Exception.InnerException.Message [$($errorRecord.Exception.InnerException.Message)]"
+        }
+    }
+    catch {
+        $outputFilename = "$($compName)_ERROR.txt"
+        $script:logFilePath = $currentFolderPath + $outputFilename
+        Submit-Log -text "Error: Function - Submit-Log. Possible Error in creation of file." -errorRecord $_
+        # TODO: Rethink this catch block.
+        exit
+    }
+    finally{
+        Write-Verbose "ENDFUNCTION: Submit-Log"
+    }
+}
+
+<#
+Initialize the logfile name and have option to retrive errorfile path , errorfile name, successfile path and successfile name.
+Also verify if logFileNamePrefix is available or not.
+Handle other errors.
+#>
+function LogFileName {
+    [cmdletbinding()]
+    param (
+        [switch] $errorFlag,
+        [switch] $successFlag
+        )
+    try {
+        Write-Verbose "LogFileName function started" -Verbose
+
+        $fileNamePathObject = New-Object -TypeName psobject
+        if ($errorFlag) {
+            $outputFilename = "$($logFileNamePrefix)_$($compName)_ERROR.txt"
+            $logFilePath = $currentFolderPath + $outputFilename
+        }
+        elseif ($successFlag) {
+            $outputFilename = "$($logFileNamePrefix)_$($compName)_SUCCESS.txt"
+            $logFilePath = $currentFolderPath + $outputFilename
+        }
+        else {
+            $outputFilename = "$($logFileNamePrefix)_$($compName).txt"
+            $logFilePath = $currentFolderPath + $outputFilename
+        }
+
+        $fileNamePathObject | Add-Member -MemberType NoteProperty -Name Name -Value $outputFilename
+        $fileNamePathObject | Add-Member -MemberType NoteProperty -Name Path -Value $logFilePath
+        return $fileNamePathObject
+    }
+    catch {
+        <#
+        Exeption Handling - Catch block for the function LogFileName
+        #>
+        if ($logFilePath) {
+            $outputFilename = "$($logFileNamePrefix)_$($compName)_ERROR.txt"
+            $logFilePath_new = $currentFolderPath + $outputFilename
+            Rename-Item -Path "$($logFilePath)" -NewName "$($logFilePath_new)" -Force
+        }
+        $outputFilename = "$($logFileNamePrefix)_$($compName)_ERROR.txt"
+        $script:logFilePath = $currentFolderPath + $outputFilename
+        Submit-Log -text "New LogFilePath : $($logFilePath)"
+        Submit-Log -text "ERROR: Function - logfilename" -errorRecord $_
+        exit
+    }
+}
+
+<#
+Submit-Error Function aggregates the step when an error is encountered.
+#>
+function Submit-Error {
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [String] $text,
+        $errorRecord
+    )
+    try {
+        <#
+        Change the logFilePath even if the logFilePath is empty.
+        #>
+        $fileObject = logFileName  -errorFlag
+        if ($logFilePath) {
+            Rename-Item -Path "$($logFilePath)" -NewName "$($fileObject.Name)" -Force
+        }
+
+        $script:logFilePath = $fileObject.Path
+
+        if ($text) {
+            Submit-Log -text "$($text)"
+        }
+        If ( $errorRecord -is [System.Management.Automation.ErrorRecord] )
+        {
+            Submit-Log -Text "Exception.Message [$($errorRecord.Exception.Message)]"
+            Submit-Log -Text "Exception.GetType() [$($errorRecord.Exception.GetType())]"
+            Submit-Log -Text "Exception.InnerException.Message [$($errorRecord.Exception.InnerException.Message)]"
+        }
+
+        Submit-Log -text "New LogFilePath : $($logFilePath)"
+    }
+    catch {
+        Submit-Log -text "ERROR - execution of Submit-Error Function" -errorRecord $_
+        # Submit-Error
+        # TODO: Create an alternative of Submit-Error in this catch block.
+        exit
+    }
+}
 function parameterValidation {
     [CmdletBinding()]
     param (
@@ -80,24 +225,34 @@ function enableWakeOnMagicPacket {
         $adapter
     )
     try {
-        Write-Output "STARTFUNCTION: enableWakeOnMagicPacket"
+        $output_item = New-Object -TypeName psobject
+        $output_item | Add-Member -MemberType NoteProperty -Name "Property" -Value "enableWakeOnMagicPacket"
+        Submit-Log -text "STARTFUNCTION: enableWakeOnMagicPacket"
         $wakeonmagicpacket_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonmagicpacket"
-        Write-Output "Current wakeonmagicpacket status: " $wakeonmagicpacket_status
+        Submit-Log -text "Current wakeonmagicpacket status: " $wakeonmagicpacket_status
+        $output_item | Add-Member -MemberType NoteProperty -Name "Previous Value" -Value $wakeonmagicpacket_status
 
         if ($wakeonmagicpacket_status -ne "Enabled") {
             Enable-NetAdapterPowerManagement -Name $adapter.Name -WakeOnMagicPacket
-            Write-Output "WakeOnMagicPacket Setting was set"
+            Submit-Log -text "WakeOnMagicPacket Setting was set"
         }
         else {
-            Write-Output "WakeOnMagicPacket Setting was already set."
+            Submit-Log -text "WakeOnMagicPacket Setting was already set."
         }
+
+        $output_item | Add-Member -MemberType NoteProperty -Name "Current Value" -Value "Enabled"
+        return $output_item
+        # $object_item = [PSCustomObject]@{
+        #     "Property" = "enableWakeOnMagicPacket"
+        #     "Previous Value" = $wakeonmagicpacket_status
+        #     "Current Value" =
     }
     catch {
-        Write-Output "ERROR: Function - enableWakeOnMagicPacket"
-        Write-Output "$PSItem"
+        Submit-Log -text "ERROR: Function - enableWakeOnMagicPacket"
+        Submit-Log -text "$PSItem"
     }
     finally{
-        Write-Output "ENDFUNCTION: enableWakeOnMagicPacket"
+        Submit-Log -text "ENDFUNCTION: enableWakeOnMagicPacket"
     }
 }
 
@@ -150,7 +305,7 @@ function enablePowerManagement {
         Write-Host "Enable `"Allow the computer to turn off this device to save power`""
         $deviceenable_object = Get-WmiObject -class MSPower_DeviceEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
         Write-Output "deviceenable status: $($deviceenable_object.Enable)"
-        if (-not ([bool]($deviceenable_object -match "Enable"))) {
+        if (-not ($deviceenable_object.PSObject.Properties.Match("Enable").count)) {
             Write-Output "`"Allow the computer to turn off this device to save power`" option is not available"
         }
         elseif ($deviceenable_object.Enable -ne $true) {
@@ -168,8 +323,10 @@ function enablePowerManagement {
 
         Write-Host "Enable `"Allow this device to wake the computer`""
         $devicewakeenable_object = Get-WmiObject -class MSPower_DeviceWakeEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
-        Write-Output "devicewakeenable status: $($devicewakeenable_object.Enable)"
-        if (-not ([bool]($devicewakeenable_object -match "Enable"))) {
+
+        Write-Output "devicewakeenable status: $([bool]$devicewakeenable_object.Enable)"
+        # if (-not ([bool]($devicewakeenable_object -match "Enable"))) {
+        if (-not ($devicewakeenable_object.PSObject.Properties.Match("Enable").count)) {
             Write-Output "`"Allow this device to wake the computer`" option is not available"
         }
         elseif ($devicewakeenable_object.Enable -ne $true) {
@@ -186,7 +343,7 @@ function enablePowerManagement {
 
         $devicewakeonmagicpacketonly_object = Get-WmiObject -class MSNdis_DeviceWakeOnMagicPacketOnly -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
         Write-Output "devicewakeonmagicpacketonly status: $($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly)"
-        if (-not ([bool]($devicewakeonmagicpacketonly_object -match "EnableWakeOnMagicPacketOnly"))) {
+        if (-not ($devicewakeonmagicpacketonly_object.PSObject.Properties.Match("EnableWakeOnMagicPacketOnly").count)) {
             Write-Output "`"Only allow a magic packet to wake the computer`" option is not available"
         }
         elseif ($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly -ne $true) {
@@ -287,7 +444,7 @@ function disablePowerManagement {
         $deviceenable_object = Get-WmiObject -class MSPower_DeviceEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
         Write-Output "deviceenable status: $($deviceenable_object.Enable)"
 
-        if (-not ([bool]($deviceenable_object -match "Enable"))) {
+        if (-not ($deviceenable_object.PSObject.Properties.Match("Enable").count)) {
             Write-Output "`"Allow the computer to turn off this device to save power`" option is not available"
         }
         elseif ($deviceenable_object.Enable -eq $true) {
@@ -306,7 +463,7 @@ function disablePowerManagement {
         Write-Host "Disable `"Allow this device to wake the computer`""
         $devicewakeenable_object = Get-WmiObject -class MSPower_DeviceWakeEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
         Write-Output "devicewakeenable status: $($devicewakeenable_object.Enable)"
-        if (-not ([bool]($devicewakeonmagicpacketonly_object -match "EnableWakeOnMagicPacketOnly"))) {
+        if (-not ($devicewakeenable_object.PSObject.Properties.Match("Enable").count)) {
             Write-Output "`"Only allow a magic packet to wake the computer`" option is not available"
         }
         elseif ($devicewakeenable_object.Enable -eq $true) {
@@ -323,7 +480,7 @@ function disablePowerManagement {
 
         $devicewakeonmagicpacketonly_object = Get-WmiObject -class MSNdis_DeviceWakeOnMagicPacketOnly -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
         Write-Output "devicewakeonmagicpacketonly status: $($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly)"
-        if (-not ([bool]($devicewakeonmagicpacketonly_object -match "EnableWakeOnMagicPacketOnly"))) {
+        if (-not ($devicewakeonmagicpacketonly_object.PSObject.Properties.Match("EnableWakeOnMagicPacketOnly").count)) {
             Write-Output "`"Only allow a magic packet to wake the computer`" option is not available"
         }
         elseif ($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly -eq $true) {
@@ -382,28 +539,33 @@ function disableHiberbootEnabledRegistry {
 
 try {
     # Script variables
+    $logFilePath = (LogFileName).Path
     parameterValidation $adapter_name
     $net_adapters = get-netadapter -name $adapter_name*
 
     $adapter = selectAdapter $net_adapters
-    Write-Output "Selected Adapter:" $adapter
+    Submit-Log -text "Selected Adapter:$($adapter.InterfaceDescription)"
 
+    # array to store the output objects
+    $output_array = @()
     # Main procedure for the script
     if ($enable_wakeonlan -and $disable_wakeonlan) {
-        Write-Output "You cannot enable and disable wakeonlan at the same time. Please provide one argument"
+        Submit-Log -text "You cannot enable and disable wakeonlan at the same time. Please provide one argument"
         exit
     }
     elseif ($enable_wakeonlan) {
-        enableWakeOnMagicPacket -adapter $adapter
+        $object_item = enableWakeOnMagicPacket -adapter $adapter
+        $output_array += $output_item
+        Submit-Log -text "Object $($output_array | Out-String) "
         enableWakeOnPattern -adapter $adapter
         enablePowerManagement -adapter $adapter
-        Write-Output "SUCCESS: Wake on lan settings were set."
+        Submit-Log -text "SUCCESS: Wake on lan settings were set."
     }
     else {
         disableWakeOnMagicPacket -adapter $adapter
         disableWakeOnPattern -adapter $adapter
         disablePowerManagement -adapter $adapter
-        Write-Output "SUCCESS: Wake on lan settings were disabled."
+        Submit-Log -text "SUCCESS: Wake on lan settings were disabled."
     }
 
     # Check if disablefaststartup switch is present and if present execute accourdingly.
@@ -413,9 +575,6 @@ try {
 
 }
 catch {
-    Write-Output "ERROR: Main Block"
-    Write-Output $PSItem.tostring()
+    Submit-Error -text "ERROR: Main Block" -errorRecord $_
+    exit
 }
-
-
-
