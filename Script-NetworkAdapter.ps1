@@ -15,6 +15,9 @@ param (
     $disable_wakeonlan,
     [Parameter()]
     [switch]
+    $enable_faststartup,
+    [Parameter()]
+    [switch]
     $disable_faststartup,
     [Parameter()]
     [string] $logFileNamePrefix="WakeOnLan" #Default value is WakeOnLan - prefix to the log file
@@ -32,6 +35,18 @@ $currentFolderPath += '\'
 compname - Current local computer name where the script is executed.
 #>
 $compName = $env:COMPUTERNAME
+
+<#
+Array to store the property objects
+#>
+$propertyArray = @()
+
+<#
+Delete any text files in the current folder
+#>
+if (Get-ChildItem -Path $currentFolderPath*.txt) {
+    remove-item $currentFolderPath*.txt
+}
 
 <#
 Log function to output to verbose stream as well as log into file
@@ -64,11 +79,20 @@ function Submit-Log {
         }
     }
     catch {
-        $outputFilename = "$($compName)_ERROR.txt"
+        <#
+        Exeption Handling - Catch block for the function Submit-Log
+        #>
+        if ($logFilePath) {
+            $outputFilename = "$($logFileNamePrefix)_$($compName)_ERROR.txt"
+            $logFilePath_new = $currentFolderPath + $outputFilename
+            Rename-Item -Path "$($logFilePath)" -NewName "$($logFilePath_new)" -Force
+        }
+        $outputFilename = "$($logFileNamePrefix)_$($compName)_ERROR.txt"
         $script:logFilePath = $currentFolderPath + $outputFilename
+        Submit-Log -text "New LogFilePath : $($logFilePath)"
         Submit-Log -text "Error: Function - Submit-Log. Possible Error in creation of file." -errorRecord $_
-        # TODO: Rethink this catch block.
         exit
+        # TODO: Rethink this catch block.
     }
     finally{
         Write-Verbose "ENDFUNCTION: Submit-Log"
@@ -164,6 +188,22 @@ function Submit-Error {
         exit
     }
 }
+
+function Set-Property {
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        $property,
+        $previousValue,
+        $currentValue
+    )
+    $propertyItem = [PSCustomObject]@{
+        "Property" = $property
+        "Previous Value" = $previousValue
+        "Current Value" = $currentValue
+    }
+    $script:propertyArray += $propertyItem
+}
 function parameterValidation {
     [CmdletBinding()]
     param (
@@ -225,12 +265,11 @@ function enableWakeOnMagicPacket {
         $adapter
     )
     try {
-        $output_item = New-Object -TypeName psobject
-        $output_item | Add-Member -MemberType NoteProperty -Name "Property" -Value "enableWakeOnMagicPacket"
         Submit-Log -text "STARTFUNCTION: enableWakeOnMagicPacket"
-        $wakeonmagicpacket_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonmagicpacket"
-        Submit-Log -text "Current wakeonmagicpacket status: " $wakeonmagicpacket_status
-        $output_item | Add-Member -MemberType NoteProperty -Name "Previous Value" -Value $wakeonmagicpacket_status
+        # $wakeonmagicpacket_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonmagicpacket"
+        $wakeonmagicpacket_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        $wakeonmagicpacket_status = $wakeonmagicpacket_object.WakeOnMagicPacket
+        Submit-Log -text "STATUS: wakeonmagicpacket - $($wakeonmagicpacket_status)"
 
         if ($wakeonmagicpacket_status -ne "Enabled") {
             Enable-NetAdapterPowerManagement -Name $adapter.Name -WakeOnMagicPacket
@@ -240,16 +279,13 @@ function enableWakeOnMagicPacket {
             Submit-Log -text "WakeOnMagicPacket Setting was already set."
         }
 
-        $output_item | Add-Member -MemberType NoteProperty -Name "Current Value" -Value "Enabled"
-        return $output_item
-        # $object_item = [PSCustomObject]@{
-        #     "Property" = "enableWakeOnMagicPacket"
-        #     "Previous Value" = $wakeonmagicpacket_status
-        #     "Current Value" =
+        # create a new object to get the updated value.
+        $wakeonmagicpacket_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        Set-Property -property "WakeOnMagicPacket" -previousValue "$($wakeonmagicpacket_status)" -currentValue "$($wakeonmagicpacket_object.WakeOnMagicPacket)"
+
     }
     catch {
-        Submit-Log -text "ERROR: Function - enableWakeOnMagicPacket"
-        Submit-Log -text "$PSItem"
+        Submit-Error -text "ERROR: Function - enableWakeOnMagicPacket" -errorRecord $PSItem
     }
     finally{
         Submit-Log -text "ENDFUNCTION: enableWakeOnMagicPacket"
@@ -265,24 +301,28 @@ function enableWakeOnPattern {
     )
 
     try {
-        Write-Output "STARTFUNCTION: enableWakeOnPattern"
-        $wakeonpattern_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonpattern"
-        Write-Output "wakeonpattern_status: " $wakeonpattern_status
+        Submit-Log "STARTFUNCTION: enableWakeOnPattern"
+        # $wakeonpattern_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonpattern"
+        $wakeonpattern_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        $wakeonpattern_status = $wakeonpattern_object.WakeOnPattern
+        Submit-Log "STATUS: wakeonpattern - $($wakeonpattern_status)"
 
         if ($wakeonpattern_status -ne "Enabled") {
             Enable-NetAdapterPowerManagement -Name $adapter.Name -WakeOnPattern
-            Write-Output "WakeOnPattern Setting was set"
+            Submit-Log "WakeOnPattern Setting was set"
         }
         else {
-            Write-Output "WakeOnPattern Setting was already set."
+            Submit-Log "WakeOnPattern Setting was already set."
         }
+        # create a new object to get the updated value.
+        $wakeonpattern_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        Set-Property -property "WakeOnPattern" -previousValue "$($wakeonpattern_status)" -currentValue "$($wakeonpattern_object.WakeOnPattern)"
     }
     catch {
-        Write-Output "ERROR Function - enableWakeOnPattern"
-        Write-Output "$PSItem"
+        Submit-Error "ERROR Function - enableWakeOnPattern" -errorRecord $PSItem
     }
     finally{
-        Write-Output "ENDFUNCTION: enableWakeOnPattern"
+        Submit-Log "ENDFUNCTION: enableWakeOnPattern"
     }
 }
 
@@ -295,73 +335,89 @@ function enablePowerManagement {
     )
 
     try {
-        Write-Output "STARTFUNCTION: enablePowerManagement"
+        Submit-Log "STARTFUNCTION: enablePowerManagement"
         <# Note: When you use Get-CimInstance to get instance of the class MSNdis_DeviceWakeOnMagicPacketOnly we are unable to call Put method on the base class as it does not exist. Using Get-WMIObject we are able to call the put method and therfore making the change persistant. #>
         # $pnp_deviceid = $adapter | Select-Object -ExpandProperty "PnPDeviceID"
         $pnp_deviceid = $adapter.PnPDeviceID
+        $set_value = ""
 
         #-----> Allow the computer to turn off this device to save power
 
-        Write-Host "Enable `"Allow the computer to turn off this device to save power`""
+        Submit-Log "Enable `"Allow the computer to turn off this device to save power`""
         $deviceenable_object = Get-WmiObject -class MSPower_DeviceEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
-        Write-Output "deviceenable status: $($deviceenable_object.Enable)"
+        $deviceenable_status = $deviceenable_object.Enable
+        Submit-Log "STATUS: deviceenable status - $($deviceenable_status)"
         if (-not ($deviceenable_object.PSObject.Properties.Match("Enable").count)) {
-            Write-Output "`"Allow the computer to turn off this device to save power`" option is not available"
+            Submit-Log "`"Allow the computer to turn off this device to save power`" option is not available"
+            $set_value = "Unavailable"
         }
         elseif ($deviceenable_object.Enable -ne $true) {
             $deviceenable_object.Enable = $true
             #call the Put method from the base WMI object so to write the changes back to the WMI database and thereby fixing the change.
             # void is used to eliminate the output from the statement
             [void] $deviceenable_object.psbase.Put()
-            Write-Output "Allow the computer to turn off this device to save power is now enabled"
+            Submit-Log "Allow the computer to turn off this device to save power is now enabled"
+            $set_value = $deviceenable_object.Enable
         }
         else {
-            Write-Output "Allow the computer to turn off this device to save power was already enabled"
+            Submit-Log "Allow the computer to turn off this device to save power was already enabled"
+            $set_value = $deviceenable_object.Enable
         }
 
+        Set-Property -property "Turn Off Device To Save Power" -previousValue "$($deviceenable_status)" -currentValue "$($set_value)"
+
         #-----> Allow this device to wake the computer
-
-        Write-Host "Enable `"Allow this device to wake the computer`""
+        Submit-Log "Enable `"Allow this device to wake the computer`""
         $devicewakeenable_object = Get-WmiObject -class MSPower_DeviceWakeEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
-
-        Write-Output "devicewakeenable status: $([bool]$devicewakeenable_object.Enable)"
+        $devicewakeenable_status = $devicewakeenable_object.Enable
+        Submit-Log "STATUS: devicewakeenable status - $($devicewakeenable_status)"
         # if (-not ([bool]($devicewakeenable_object -match "Enable"))) {
         if (-not ($devicewakeenable_object.PSObject.Properties.Match("Enable").count)) {
-            Write-Output "`"Allow this device to wake the computer`" option is not available"
+            Submit-Log "`"Allow this device to wake the computer`" option is not available"
+            $set_value = "Unavailable"
         }
         elseif ($devicewakeenable_object.Enable -ne $true) {
             $devicewakeenable_object.Enable = $true
             #call the Put method from the base WMI object so to write the changes back to the WMI database and thereby fixing the change.
             [void] $devicewakeenable_object.psbase.Put()
-            Write-Output "Allow this device to wake the computer is now enabled"
+            Submit-Log "Allow this device to wake the computer is now enabled"
+            $set_value = $devicewakeenable_object.Enable
         }
         else {
-            Write-Output "Allow this device to wake the computer was already enabled"
+            Submit-Log "Allow this device to wake the computer was already enabled"
+            $set_value = $devicewakeenable_object.Enable
         }
+
+        Set-Property -property "Wake up the computer" -previousValue "$($devicewakeenable_status)" -currentValue "$($set_value)"
 
         #-----> Only allow a magic packet to wake the computer
 
         $devicewakeonmagicpacketonly_object = Get-WmiObject -class MSNdis_DeviceWakeOnMagicPacketOnly -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
-        Write-Output "devicewakeonmagicpacketonly status: $($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly)"
+        $devicewakeonmagicpacketonly_status = $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly
+        Submit-Log "STATUS: devicewakeonmagicpacketonly status - $($devicewakeonmagicpacketonly_status)"
         if (-not ($devicewakeonmagicpacketonly_object.PSObject.Properties.Match("EnableWakeOnMagicPacketOnly").count)) {
-            Write-Output "`"Only allow a magic packet to wake the computer`" option is not available"
+            Submit-Log "`"Only allow a magic packet to wake the computer`" option is not available"
+            $set_value = "Unavailable"
         }
         elseif ($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly -ne $true) {
             $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly = $true
             #call the Put method from the base WMI object so to write the changes back to the WMI database and thereby fixing the change.
             [void] $devicewakeonmagicpacketonly_object.psbase.Put()
-            Write-Output "Only allow a magic packet to wake the computer is now enabled"
+            Submit-Log "Only allow a magic packet to wake the computer is now enabled"
+            $set_value = $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly
         }
         else {
-            Write-Output "Only allow a magic packet to wake the computer was already enabled"
+            Submit-Log "Only allow a magic packet to wake the computer was already enabled"
+            $set_value = $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly
         }
+
+        Set-Property -property "Only allow magic packect" -previousValue "$($devicewakeonmagicpacketonly_status)" -currentValue "$($set_value)"
     }
     catch {
-        Write-Output "ERROR: Function - enablePowerManagement"
-        Write-Output $PSItem.tostring()
+        Submit-Error "ERROR: Function - enablePowerManagement" -errorRecord $PSItem
     }
     finally{
-        Write-Output "ENDFUNCTION: enablePowerManagement"
+        Submit-Log "ENDFUNCTION: enablePowerManagement"
     }
 }
 
@@ -373,24 +429,28 @@ function disableWakeOnMagicPacket {
         $adapter
     )
     try {
-        Write-Output "STARTFUNCTION: disableWakeOnMagicPacket"
-        $wakeonmagicpacket_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonmagicpacket"
-        Write-Output "Current wakeonmagicpacket status: " $wakeonmagicpacket_status
+        Submit-Log "STARTFUNCTION: disableWakeOnMagicPacket"
+        $wakeonmagicpacket_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        $wakeonmagicpacket_status = $wakeonmagicpacket_object.WakeOnMagicPacket
+        Submit-Log "STATUS: Current wakeonmagicpacket - $($wakeonmagicpacket_status)"
 
         if ($wakeonmagicpacket_status -eq "Enabled") {
             Disable-NetAdapterPowerManagement -Name $adapter.Name -WakeOnMagicPacket
-            Write-Output "WakeOnMagicPacket Setting was disabled"
+            Submit-Log "WakeOnMagicPacket Setting was disabled"
         }
         else {
-            Write-Output "WakeOnMagicPacket Setting was already disabled."
+            Submit-Log "WakeOnMagicPacket Setting was already disabled."
         }
+
+        # create a new object to get the updated value.
+        $wakeonmagicpacket_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        Set-Property -property "WakeOnMagicPacket" -previousValue "$($wakeonmagicpacket_status)" -currentValue "$($wakeonmagicpacket_object.WakeOnMagicPacket)"
     }
     catch {
-        Write-Output "ERROR: Function - disableWakeOnMagicPacket"
-        Write-Output "$PSItem"
+        Submit-Error -text "ERROR: Function - disableWakeOnMagicPacket" -errorRecord $PSItem
     }
     finally{
-        Write-Output "ENDFUNCTION: disableWakeOnMagicPacket"
+        Submit-Log "ENDFUNCTION: disableWakeOnMagicPacket"
     }
 }
 
@@ -403,24 +463,28 @@ function disableWakeOnPattern {
     )
 
     try {
-        Write-Output "STARTFUNCTION: disableWakeOnPattern"
-        $wakeonpattern_status = Get-NetAdapterPowerManagement -Name $adapter.Name | Select-Object -ExpandProperty "wakeonpattern"
-        Write-Output "wakeonpattern_status: " $wakeonpattern_status
+        Submit-Log "STARTFUNCTION: disableWakeOnPattern"
+        $wakeonpattern_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        $wakeonpattern_status = $wakeonpattern_object.WakeOnPattern
+        Submit-Log "STATUS: wakeonpattern - $($wakeonpattern_status)"
 
         if ($wakeonpattern_status -eq "Enabled") {
             Disable-NetAdapterPowerManagement -Name $adapter.Name -WakeOnPattern
-            Write-Output "WakeOnPattern Setting was disabled"
+            Submit-Log "WakeOnPattern Setting was disabled"
         }
         else {
-            Write-Output "WakeOnPattern Setting was already disabled."
+            Submit-Log "WakeOnPattern Setting was already disabled."
         }
+
+        # create a new object to get the updated value.
+        $wakeonpattern_object = Get-NetAdapterPowerManagement -Name $adapter.Name
+        Set-Property -property "WakeOnPattern" -previousValue "$($wakeonpattern_status)" -currentValue "$($wakeonpattern_object.WakeOnPattern)"
     }
     catch {
-        Write-Output "ERROR: Function - disableWakeOnPattern"
-        Write-Output "$PSItem"
+        Submit-Error -text "ERROR: Function - disableWakeOnPattern" -errorRecord $PSItem
     }
     finally{
-        Write-Output "ENDFUNCTION: disableWakeOnPattern"
+        Submit-Log "ENDFUNCTION: disableWakeOnPattern"
     }
 }
 
@@ -433,79 +497,135 @@ function disablePowerManagement {
     )
 
     try {
-        Write-Output "STARTFUNCTION: disablePowerManagement"
+        Submit-Log "STARTFUNCTION: disablePowerManagement"
         <# Note: When you use Get-CimInstance to get instance of the class MSNdis_DeviceWakeOnMagicPacketOnly we are unable to call Put method on the base class as it does not exist. Using Get-WMIObject we are able to call the put method and therfore making the change persistant. #>
         # $pnp_deviceid = $adapter | Select-Object -ExpandProperty "PnPDeviceID"
         $pnp_deviceid = $adapter.PnPDeviceID
 
         #-----> Allow the computer to turn off this device to save power
 
-        Write-Host "Disable `"Allow the computer to turn off this device to save power`""
+        Submit-Log "Disable `"Allow the computer to turn off this device to save power`""
         $deviceenable_object = Get-WmiObject -class MSPower_DeviceEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
-        Write-Output "deviceenable status: $($deviceenable_object.Enable)"
+        $deviceenable_status = $deviceenable_object.Enable
+        Submit-Log "STATUS: deviceenable - $($deviceenable_status)"
 
         if (-not ($deviceenable_object.PSObject.Properties.Match("Enable").count)) {
-            Write-Output "`"Allow the computer to turn off this device to save power`" option is not available"
+            Submit-Log "`"Allow the computer to turn off this device to save power`" option is not available"
+            $set_value = "Unavailable"
         }
         elseif ($deviceenable_object.Enable -eq $true) {
             $deviceenable_object.Enable = $false
             #call the Put method from the base WMI object so to write the changes back to the WMI database and thereby fixing the change.
             # void is used to eliminate the output from the statement
             [void] $deviceenable_object.psbase.Put()
-            Write-Output "Allow the computer to turn off this device to save power is now disabled"
+            Submit-Log "Allow the computer to turn off this device to save power is now disabled"
+            $set_value = $deviceenable_object.Enable
         }
         else {
-            Write-Output "Allow the computer to turn off this device to save power was already disabled"
+            Submit-Log "Allow the computer to turn off this device to save power was already disabled"
+            $set_value = $deviceenable_object.Enable
         }
+
+        Set-Property -property "Turn Off Device To Save Power" -previousValue "$($deviceenable_status)" -currentValue "$($set_value)"
 
         #-----> Allow this device to wake the computer
 
-        Write-Host "Disable `"Allow this device to wake the computer`""
+        Submit-Log "Disable `"Allow this device to wake the computer`""
         $devicewakeenable_object = Get-WmiObject -class MSPower_DeviceWakeEnable -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
-        Write-Output "devicewakeenable status: $($devicewakeenable_object.Enable)"
+        $devicewakeenable_status = $devicewakeenable_object.Enable
+        Submit-Log "STATUS: devicewakeenable - $($devicewakeenable_status)"
         if (-not ($devicewakeenable_object.PSObject.Properties.Match("Enable").count)) {
-            Write-Output "`"Only allow a magic packet to wake the computer`" option is not available"
+            Submit-Log "`"Only allow a magic packet to wake the computer`" option is not available"
+            $set_value = "Unavailable"
         }
         elseif ($devicewakeenable_object.Enable -eq $true) {
             $devicewakeenable_object.Enable = $false
             #call the Put method from the base WMI object so to write the changes back to the WMI database and thereby fixing the change.
             [void] $devicewakeenable_object.psbase.Put()
-            Write-Output "Allow this device to wake the computer is now disabled"
+            Submit-Log "Allow this device to wake the computer is now disabled"
+            $set_value = $devicewakeenable_object.Enable
         }
         else {
-            Write-Output "Allow this device to wake the computer was already disabled"
+            Submit-Log "Allow this device to wake the computer was already disabled"
+            $set_value = $devicewakeenable_object.Enable
         }
+
+        Set-Property -property "Wake up the computer" -previousValue "$($devicewakeenable_status)" -currentValue "$($set_value)"
 
         #-----> Only allow a magic packet to wake the computer
 
+        Submit-Log "Disable `"Only allow a magic packet to wake the computer`""
         $devicewakeonmagicpacketonly_object = Get-WmiObject -class MSNdis_DeviceWakeOnMagicPacketOnly -Namespace root/wmi | where-object instancename -like "*$($pnp_deviceid)*"
-        Write-Output "devicewakeonmagicpacketonly status: $($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly)"
+        $devicewakeonmagicpacketonly_status = $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly
+        Submit-Log "STATUS: devicewakeonmagicpacketonly - $($devicewakeonmagicpacketonly_status)"
         if (-not ($devicewakeonmagicpacketonly_object.PSObject.Properties.Match("EnableWakeOnMagicPacketOnly").count)) {
-            Write-Output "`"Only allow a magic packet to wake the computer`" option is not available"
+            Submit-Log "`"Only allow a magic packet to wake the computer`" option is not available"
+            $set_value = "Unavailable"
         }
         elseif ($devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly -eq $true) {
             $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly = $false
             #call the Put method from the base WMI object so to write the changes back to the WMI database and thereby fixing the change.
             [void] $devicewakeonmagicpacketonly_object.psbase.Put()
-            Write-Output "Only allow a magic packet to wake the computer is now disabled"
+            Submit-Log "Only allow a magic packet to wake the computer is now disabled"
+            $set_value = $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly
         }
         else {
-            Write-Output "Only allow a magic packet to wake the computer was already disabled"
+            Submit-Log "Only allow a magic packet to wake the computer was already disabled"
+            $set_value = $devicewakeonmagicpacketonly_object.EnableWakeOnMagicPacketOnly
         }
+
+        Set-Property -property "Only allow magic packect" -previousValue "$($devicewakeonmagicpacketonly_status)" -currentValue "$($set_value)"
     }
     catch {
-        Write-Output "ERROR Function - disablePowerManagement"
-        Write-Output $PSItem.tostring()
+        Submit-Error -text "ERROR Function - disablePowerManagement" -errorRecord $PSItem
     }
     finally{
-        Write-Output "ENDFUNCTION: disablePowerManagement"
+        Submit-Log "ENDFUNCTION: disablePowerManagement"
+    }
+}
+
+function enableHiberbootEnabledRegistry {
+    try {
+        # When the registry key HiberbootEnabled is set to 0 (disabled) Fast startup gets disabled.
+        Submit-Log "STARTFUNCTION: enableHiberbootEnabledRegistry"
+
+        # local variables
+        $registry_path = "hklm:\SYSTEM\CurrentControlSet\Control\Session?Manager\Power"
+        $name = "HiberbootEnabled"
+        $value = 1
+
+        # Check whether registry path exists.
+        if (!(Test-Path $registry_path)) {
+            throw "ERROR: Registry Path doesn't exist"
+        }
+        $FindHiberbootEnabled = Get-ItemProperty $registry_path
+        $FindHiberbootEnabled_status = $FindHiberbootEnabled.HiberbootEnabled
+        # This checks if HiberbootEnabled is equal to 1.
+        If ($FindHiberbootEnabled.HiberbootEnabled -eq 0)
+        {
+            Submit-Log "HiberbootEnabled is DISABLED. Setting to ENABLED..."
+            Set-ItemProperty -Path $FindHiberbootEnabled.PSPath -Name $name -Value $value -Type DWORD -Force
+        }
+        Else
+        {
+            Submit-Log "HiberbootEnabled is already ENABLED"
+        }
+
+        $FindHiberbootEnabled = Get-ItemProperty $registry_path
+        Set-Property -property "HiberbootEnabled" -previousValue "$($FindHiberbootEnabled_status)" -currentValue "$($FindHiberbootEnabled.HiberbootEnabled)"
+    }
+    catch {
+        Submit-Error -text "ERROR: Function - enableHiberbootEnabledRegistry" -errorRecord $PSItem
+    }
+    finally{
+        Submit-Log "ENDFUNCTION: enableHiberbootEnabledRegistry"
     }
 }
 
 function disableHiberbootEnabledRegistry {
     try {
         # When the registry key HiberbootEnabled is set to 0 (disabled) Fast startup gets disabled.
-        Write-Output "STARTFUNCTION: disableHiberbootEnabledRegistry"
+        Submit-Log "STARTFUNCTION: disableHiberbootEnabledRegistry"
 
         # local variables
         $registry_path = "hklm:\SYSTEM\CurrentControlSet\Control\Session?Manager\Power"
@@ -517,23 +637,52 @@ function disableHiberbootEnabledRegistry {
             throw "ERROR: Registry Path doesn't exist"
         }
         $FindHiberbootEnabled = Get-ItemProperty "hklm:\SYSTEM\CurrentControlSet\Control\Session?Manager\Power"
+        $FindHiberbootEnabled_status = $FindHiberbootEnabled.HiberbootEnabled
         # This checks if HiberbootEnabled is equal to 1.
         If ($FindHiberbootEnabled.HiberbootEnabled -eq 1)
         {
-            write-output "HiberbootEnabled is Enabled. Setting to DISABLED..."
+            Submit-Log "HiberbootEnabled is Enabled. Setting to DISABLED..."
             Set-ItemProperty -Path $FindHiberbootEnabled.PSPath -Name $name -Value $value -Type DWORD -Force
         }
         Else
         {
-            write-output "HiberbootEnabled is already DISABLED"
+            Submit-Log "HiberbootEnabled is already DISABLED"
         }
+
+        $FindHiberbootEnabled = Get-ItemProperty $registry_path
+        Set-Property -property "HiberbootEnabled" -previousValue "$($FindHiberbootEnabled_status)" -currentValue "$($FindHiberbootEnabled.HiberbootEnabled)"
     }
     catch {
-        Write-Output "ERROR: Function - disableHiberbootEnabledRegistry"
-        Write-Output $PSItem.tostring()
+        Submit-Error -text "ERROR: Function - disableHiberbootEnabledRegistry" -errorRecord $PSItem
     }
     finally{
-        Write-Output "ENDFUNCTION: disableHiberbootEnabledRegistry"
+        Submit-Log "ENDFUNCTION: disableHiberbootEnabledRegistry"
+    }
+}
+
+function successProcess {
+
+    try {
+        Submit-Log -text "STARTFUNCTION: successProcess"
+        $logContents = "`n------------------------- Log Details -----------------------------------------`n`n"
+        $logContents += Get-Content $logFilePath -Encoding UTF8 -Raw
+        $fileObject = logFileName -successFlag
+        $output = "`n------------------------------ Output -------------------------------------------`n"
+        $output += $propertyArray | Out-String
+        # $output | Out-File -FilePath $logFilePath -Encoding UTF8 -Append | Out-Null
+        Set-Content $logFilePath -value $output
+        Add-Content $logFilePath $logContents -NoNewline
+        # $logContents | Out-File -FilePath $logFilePath -Encoding UTF8 -Append | Out-Null
+
+        Rename-Item -Path "$($logFilePath)" -NewName "$($fileObject.Name)" -Force
+
+        $script:logFilePath = $fileObject.Path
+    }
+    catch {
+        Submit-Error -text "ERROR: Function - successProcess" -errorRecord $PSItem
+    }
+    finally{
+        Submit-Log -text "ENDFUNCTION: successProcess"
     }
 }
 
@@ -546,32 +695,39 @@ try {
     $adapter = selectAdapter $net_adapters
     Submit-Log -text "Selected Adapter:$($adapter.InterfaceDescription)"
 
-    # array to store the output objects
-    $output_array = @()
     # Main procedure for the script
     if ($enable_wakeonlan -and $disable_wakeonlan) {
         Submit-Log -text "You cannot enable and disable wakeonlan at the same time. Please provide one argument"
         exit
     }
     elseif ($enable_wakeonlan) {
-        $object_item = enableWakeOnMagicPacket -adapter $adapter
-        $output_array += $output_item
-        Submit-Log -text "Object $($output_array | Out-String) "
+        enableWakeOnMagicPacket -adapter $adapter
         enableWakeOnPattern -adapter $adapter
         enablePowerManagement -adapter $adapter
         Submit-Log -text "SUCCESS: Wake on lan settings were set."
     }
-    else {
+    elseif ($disable_wakeonlan) {
         disableWakeOnMagicPacket -adapter $adapter
         disableWakeOnPattern -adapter $adapter
         disablePowerManagement -adapter $adapter
         Submit-Log -text "SUCCESS: Wake on lan settings were disabled."
+    }
+    else {
+        Submit-Log -text "No Argument for enable or disable wake on lan"
     }
 
     # Check if disablefaststartup switch is present and if present execute accourdingly.
     if ($disable_faststartup) {
         disableHiberbootEnabledRegistry
     }
+    elseif ($enable_faststartup) {
+        enableHiberbootEnabledRegistry
+    }
+    else {
+        Submit-Log -text "No Argument for enable or disable for Fast Startup"
+    }
+
+    successProcess
 
 }
 catch {
