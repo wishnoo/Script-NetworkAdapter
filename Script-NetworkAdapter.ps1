@@ -212,19 +212,21 @@ function parameterValidation {
         $adapter_name
     )
     try {
-        Write-Output "STARTFUNCTION: parameterValidation"
-        if ((-not $adapter_name) -or (-not ($enable_wakeonlan -or $disable_wakeonlan))) {
+        Submit-Log "STARTFUNCTION: parameterValidation"
+        if ((-not ($enable_faststartup -or $disable_faststartup -or $enable_wakeonlan -or $disable_wakeonlan))) {
+            throw "ERROR - Required Parameter is empty. Require one of the following parameters : enable_faststartup disable_faststartup enable_wakeonlan disable_wakeonlan"
+        }
+        if (((-not $adapter_name) -and ($enable_wakeonlan -or $disable_wakeonlan)) -or (($adapter_name) -and (-not($enable_wakeonlan -or $disable_wakeonlan)))) {
             throw "ERROR - Required Parameter is empty. Required parameters are: adapter and one of the two (enable_wakeonlan and disable_wakeonlan)"
         }
-        Write-Output "SUCCESS: Input parameters are validated successfully."
+        Submit-Log "SUCCESS: Input parameters are validated successfully."
     }
     catch {
-        Write-Output "ERROR: Function - parameterValidation"
-        Write-Output $_.tostring()
+        Submit-Error -text "ERROR: Function - parameterValidation" -errorRecord $PSItem
         exit
     }
     finally{
-        Write-Output "ENDFUNCTION: parameterValidation"
+        Submit-Log "ENDFUNCTION: parameterValidation"
     }
 }
 
@@ -432,7 +434,7 @@ function disableWakeOnMagicPacket {
         Submit-Log "STARTFUNCTION: disableWakeOnMagicPacket"
         $wakeonmagicpacket_object = Get-NetAdapterPowerManagement -Name $adapter.Name
         $wakeonmagicpacket_status = $wakeonmagicpacket_object.WakeOnMagicPacket
-        Submit-Log "STATUS: Current wakeonmagicpacket - $($wakeonmagicpacket_status)"
+        Submit-Log "STATUS: wakeonmagicpacket - $($wakeonmagicpacket_status)"
 
         if ($wakeonmagicpacket_status -eq "Enabled") {
             Disable-NetAdapterPowerManagement -Name $adapter.Name -WakeOnMagicPacket
